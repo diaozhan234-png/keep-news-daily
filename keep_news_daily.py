@@ -29,8 +29,9 @@ logging.basicConfig(
 )
 
 # ===================== 配置 =====================
-FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
-GIST_TOKEN     = os.getenv("AI_NEWS_GIST_TOKEN", "")
+FEISHU_WEBHOOK       = os.getenv("FEISHU_WEBHOOK")
+FEISHU_ALERT_WEBHOOK = os.getenv("FEISHU_ALERT_WEBHOOK")
+GIST_TOKEN           = os.getenv("AI_NEWS_GIST_TOKEN", "")
 
 WEWE_RSS_BASE  = "http://82.156.247.106:4000/feeds"
 GLOBAL_TIMEOUT = 20
@@ -285,6 +286,39 @@ def fetch_wechat_summary(url):
     return ""
 
 
+def send_alert(message):
+    """推送告警消息到专用告警群"""
+    if not FEISHU_ALERT_WEBHOOK:
+        logging.warning("⚠️ FEISHU_ALERT_WEBHOOK 未配置，告警无法发送")
+        return
+    payload = {
+        "msg_type": "interactive",
+        "card": {
+            "header": {
+                "title": {"tag": "plain_text", "content": "⚠️ Keep行业晨报 系统告警"},
+                "template": "red"
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**时间**：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n**告警内容**：{message}"
+                    }
+                }
+            ]
+        }
+    }
+    try:
+        resp = requests.post(FEISHU_ALERT_WEBHOOK, json=payload, timeout=15)
+        if resp.status_code == 200 and resp.json().get("StatusCode") == 0:
+            logging.info("✅ 告警推送成功")
+        else:
+            logging.error(f"❌ 告警推送失败: {resp.text[:100]}")
+    except Exception as e:
+        logging.error(f"❌ 告警推送异常: {e}")
+
+
 # ===================== 飞书推送 =====================
 BADGE_COLORS = {
     "ai":     {"bg": "#E6F1FB", "text": "#185FA5", "label": "【⚡ AI动态】"},
@@ -386,6 +420,14 @@ def main():
     for cat in category_pool:
         category_pool[cat].sort(key=lambda x: x.get("pub_time", ""), reverse=True)
 
+    # 健康检查：所有公众号都返回0条说明 WeWe RSS 可能掉线
+    total_candidates = sum(len(v) for v in category_pool.values())
+    if total_candidates == 0:
+        alert_msg = "所有公众号均未抓取到文章，WeWe RSS 服务可能已掉线。请登录 http://82.156.247.106:4000 检查账号状态并重新扫码登录。"
+        logging.error(f"❌ {alert_msg}")
+        send_alert(alert_msg)
+        return
+
     # 按槽位取文章，每个公众号最多贡献1条，确保来源多样性
     final = []
     used_links = set()
@@ -429,6 +471,12 @@ def main():
                 used_links.add(link)
 
     logging.info(f"📋 最终推送 {len(final)} 条")
+
+    if len(final) == 0:
+        send_alert("今日晨报抓取结果为0条，未推送任何内容，请检查 WeWe RSS 服务状态。")
+        return
+    elif len(final) < 3:
+        send_alert(f"今日晨报仅抓取到 {len(final)} 条内容（少于3条），请检查 WeWe RSS 服务或公众号订阅状态。")
 
     # 推送飞书
     send_to_feishu(final)
