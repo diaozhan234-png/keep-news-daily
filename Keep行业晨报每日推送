@@ -1,0 +1,19 @@
+name: "Keep行业晨报每日推送"
+on:
+  workflow_dispatch:
+jobs:
+  push-keep-news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests feedparser beautifulsoup4
+      - name: Run
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          AI_NEWS_GIST_TOKEN: ${{ secrets.AI_NEWS_GIST_TOKEN }}
+        run: python keep_news_daily.py
