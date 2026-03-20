@@ -196,10 +196,19 @@ def fetch_articles_from_source(name, mp_id, category, tag, pushed_urls):
             return articles
 
         for entry in feed.entries[:20]:
-            title   = clean_text(getattr(entry, "title", ""))
-            link    = getattr(entry, "link", "")
-            summary = strip_html(getattr(entry, "summary", "") or getattr(entry, "description", ""))
+            title    = clean_text(getattr(entry, "title", ""))
+            link     = getattr(entry, "link", "")
             pub_time = getattr(entry, "published", "") or getattr(entry, "updated", "")
+
+            # 摘要：优先取 content，其次 summary，其次 description
+            raw_content = ""
+            if hasattr(entry, "content") and entry.content:
+                raw_content = entry.content[0].get("value", "")
+            if not raw_content:
+                raw_content = getattr(entry, "summary", "") or getattr(entry, "description", "")
+            summary = strip_html(raw_content)
+            # 取前150字作为摘要
+            summary = summary[:150] + "..." if len(summary) > 150 else summary
 
             if len(title) < 5:
                 continue
@@ -213,7 +222,7 @@ def fetch_articles_from_source(name, mp_id, category, tag, pushed_urls):
             articles.append({
                 "title":    title,
                 "link":     link,
-                "summary":  summary[:200] + "..." if len(summary) > 200 else summary,
+                "summary":  summary,
                 "source":   name,
                 "category": category,
                 "tag":      tag,
@@ -227,10 +236,10 @@ def fetch_articles_from_source(name, mp_id, category, tag, pushed_urls):
 
 # ===================== 飞书推送 =====================
 BADGE_COLORS = {
-    "ai":     {"bg": "#E6F1FB", "text": "#185FA5", "label": "AI动态"},
-    "mkt":    {"bg": "#EEEDFE", "text": "#3C3489", "label": "营销运营"},
-    "fit":    {"bg": "#EAF3DE", "text": "#3B6D11", "label": "健身运动"},
-    "retail": {"bg": "#FAEEDA", "text": "#854F0B", "label": "零售品牌"},
+    "ai":     {"bg": "#E6F1FB", "text": "#185FA5", "label": "【⚡ AI动态】"},
+    "mkt":    {"bg": "#EEEDFE", "text": "#3C3489", "label": "【📊 营销运营】"},
+    "fit":    {"bg": "#EAF3DE", "text": "#3B6D11", "label": "【🏃 健身运动】"},
+    "retail": {"bg": "#FAEEDA", "text": "#854F0B", "label": "【🎯 零售品牌】"},
 }
 
 IDX_EMOJI = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣", 4: "4️⃣", 5: "5️⃣"}
@@ -326,9 +335,10 @@ def main():
     for cat in category_pool:
         category_pool[cat].sort(key=lambda x: x.get("pub_time", ""), reverse=True)
 
-    # 按槽位取文章
+    # 按槽位取文章，每个公众号最多贡献1条，确保来源多样性
     final = []
     used_links = set()
+    used_sources = set()
 
     for category, target in SLOT_TARGETS.items():
         candidates = category_pool.get(category, [])
@@ -336,11 +346,17 @@ def main():
         for article in candidates:
             if count >= target:
                 break
-            link = article.get("link", "")
+            link   = article.get("link", "")
+            source = article.get("source", "")
             if link in used_links:
+                continue
+            # 同一公众号在同一分类内最多贡献1条
+            cat_source_key = f"{category}_{source}"
+            if cat_source_key in used_sources:
                 continue
             final.append(article)
             used_links.add(link)
+            used_sources.add(cat_source_key)
             count += 1
             logging.info(f"✅ [{category}] 入选: {article['title'][:50]}")
         if count < target:
