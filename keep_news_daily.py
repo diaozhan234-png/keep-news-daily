@@ -200,21 +200,47 @@ def fetch_articles_from_source(name, mp_id, category, tag, pushed_urls):
             link     = getattr(entry, "link", "")
             pub_time = getattr(entry, "published", "") or getattr(entry, "updated", "")
 
-            # 摘要：优先取 content，其次 summary，其次 description
-            raw_content = ""
+            # 多级摘要获取：content → summary → description → title兜底
+            summary = ""
             if hasattr(entry, "content") and entry.content:
-                raw_content = entry.content[0].get("value", "")
-            if not raw_content:
-                raw_content = getattr(entry, "summary", "") or getattr(entry, "description", "")
-            summary = strip_html(raw_content)
-            # 取前150字作为摘要
+                summary = strip_html(entry.content[0].get("value", ""))
+            if not summary or len(summary) < 20:
+                summary = strip_html(getattr(entry, "summary", ""))
+            if not summary or len(summary) < 20:
+                summary = strip_html(getattr(entry, "description", ""))
+            if not summary or len(summary) < 20:
+                summary = title
+
+            # 清理微信公众号常见无用前缀
+            summary = re.sub(r'^(摘要[：:]|导读[：:]|编者按[：:])', '', summary).strip()
             summary = summary[:150] + "..." if len(summary) > 150 else summary
+
+            # 摘要仍为空则抓取原文
+            if not summary or summary == title:
+                fetched = fetch_wechat_summary(link)
+                if fetched:
+                    summary = fetched
+                    logging.info(f"  [摘要] 抓取原文成功: {title[:30]}")
 
             if len(title) < 5:
                 continue
             if link and link in pushed_urls:
                 logging.info(f"  [去重] 跳过已推送: {title[:40]}")
                 continue
+
+            # 动态分类：AI相关关键词命中时强制归为AI动态
+            actual_tag      = tag
+            actual_category = category
+            ai_keywords = [
+                "ai", "人工智能", "大模型", "llm", "gpt", "claude", "gemini",
+                "deepseek", "openai", "anthropic", "模型", "智能体", "agent",
+                "机器学习", "深度学习", "神经网络", "算法", "推理", "训练"
+            ]
+            title_lower = title.lower()
+            if any(kw in title_lower for kw in ai_keywords):
+                actual_tag      = "ai"
+                actual_category = "AI动态"
+
             if not is_relevant(title, summary):
                 logging.info(f"  [过滤] 与Keep业务无关: {title[:40]}")
                 continue
@@ -224,8 +250,8 @@ def fetch_articles_from_source(name, mp_id, category, tag, pushed_urls):
                 "link":     link,
                 "summary":  summary,
                 "source":   name,
-                "category": category,
-                "tag":      tag,
+                "category": actual_category,
+                "tag":      actual_tag,
                 "pub_time": pub_time,
             })
 
@@ -233,6 +259,31 @@ def fetch_articles_from_source(name, mp_id, category, tag, pushed_urls):
     except Exception as e:
         logging.error(f"❌ {name}: 抓取失败 {e}")
     return articles
+
+def fetch_wechat_summary(url):
+    """抓取微信公众号文章正文前150字作为摘要"""
+    if not url or "mp.weixin.qq.com" not in url:
+        return ""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+            "Accept": "text/html,application/xhtml+xml",
+        }
+        resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        if resp.status_code != 200:
+            return ""
+        soup = BeautifulSoup(resp.text, "html.parser")
+        # 微信文章正文容器
+        content_el = soup.find("div", id="js_content") or soup.find("div", class_="rich_media_content")
+        if content_el:
+            paras = [p.get_text(" ", strip=True) for p in content_el.find_all("p") if len(p.get_text(strip=True)) > 20]
+            text = " ".join(paras[:5])
+            text = re.sub(r'\s+', ' ', text).strip()
+            return text[:150] + "..." if len(text) > 150 else text
+    except Exception as e:
+        logging.warning(f"  [摘要抓取] 失败: {e}")
+    return ""
+
 
 # ===================== 飞书推送 =====================
 BADGE_COLORS = {
