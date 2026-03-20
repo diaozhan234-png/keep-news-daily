@@ -16,4 +16,5 @@ jobs:
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           AI_NEWS_GIST_TOKEN: ${{ secrets.AI_NEWS_GIST_TOKEN }}
+          FEISHU_ALERT_WEBHOOK: ${{ secrets.FEISHU_ALERT_WEBHOOK }}
         run: python keep_news_daily.py
