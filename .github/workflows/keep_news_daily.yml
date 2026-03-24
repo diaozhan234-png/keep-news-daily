@@ -1,8 +1,14 @@
 name: "Keep行业晨报每日推送"
 on:
   workflow_dispatch:
+    inputs:
+      run_mode:
+        description: '运行模式：fetch（抓取缓存）或 push（推送晨报）'
+        required: false
+        default: 'fetch'
+
 jobs:
-  push-keep-news:
+  run-daily:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -17,4 +23,5 @@ jobs:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           AI_NEWS_GIST_TOKEN: ${{ secrets.AI_NEWS_GIST_TOKEN }}
           FEISHU_ALERT_WEBHOOK: ${{ secrets.FEISHU_ALERT_WEBHOOK }}
+          RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_mode || (github.event.schedule == '30 1 * * 1-5' && 'push' || 'fetch') }}
         run: python keep_news_daily.py
