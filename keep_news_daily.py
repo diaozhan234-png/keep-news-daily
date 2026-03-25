@@ -5,7 +5,7 @@ Keep 行业晨报推送脚本 v2
 ==============================================================
 运行模式（通过环境变量 RUN_MODE 控制）：
   fetch：每晚19:00抓取文章，筛选好5条，缓存到 GitHub Gist
-  push ：每早9:30从 Gist 读取昨晚缓存，直接推送到飞书
+  push ：每早9:45从 Gist 读取昨晚缓存，直接推送到飞书
 
 这样即使早上 WeWe RSS 掉线，晨报也能正常推送。
 ==============================================================
@@ -62,23 +62,47 @@ SLOT_TARGETS = {
 }
 
 KEEP_KEYWORDS = [
+    # AI/科技
     "ai", "人工智能", "大模型", "llm", "gpt", "claude", "gemini", "智能",
-    "算法", "机器学习", "深度学习", "chatgpt", "agent", "自动化",
+    "算法", "机器学习", "深度学习", "chatgpt", "agent", "自动化", "deepseek",
+    "multimodal", "多模态", "推理", "训练", "微调", "向量", "embedding",
+    "copilot", "助手", "智能体", "语言模型", "生成式", "openai", "anthropic",
+    "token", "prompt", "rag", "geo", "程序员", "开发者", "工程师",
+    # 商业/运营/增长
     "商业化", "会员", "订阅", "增长", "用户", "营销", "品牌", "运营",
-    "变现", "roi", "转化", "私域", "流量", "内容", "种草",
+    "变现", "roi", "转化", "私域", "流量", "内容", "种草", "拉新",
+    "留存", "付费", "arpu", "ltv", "gmv", "dau", "mau", "复购",
+    "社群", "kol", "koc", "直播", "短视频", "小红书", "抖音", "视频号",
+    "出海", "海外", "全球化", "本地化", "跨境", "归因", "品牌经营",
+    "增长黑客", "用户画像", "数据驱动", "精细化运营",
+    # 健身/运动/消费品
     "健身", "运动", "keep", "lululemon", "nike", "adidas", "瑜伽", "跑步",
     "训练", "健康", "体育", "穿戴", "手环", "手表", "蛋白", "营养",
-    "零售", "电商", "ip", "联名", "潮牌", "消费", "drg", "dtc",
-    "渠道", "供应链", "线下", "线上", "复购", "盈利", "营收",
-    "openai", "anthropic", "google", "microsoft", "meta", "字节", "腾讯",
+    "减脂", "增肌", "塑形", "健身房", "跑步机", "单车", "游泳", "徒步",
+    "运动服", "运动鞋", "运动装备", "健康食品", "代餐", "功能饮料",
+    "peloton", "fiture", "咕咚", "garmin", "apple watch",
+    # 零售/品牌/IP
+    "零售", "电商", "ip", "联名", "潮牌", "消费", "dtc",
+    "渠道", "供应链", "线下", "线上", "盈利", "营收",
+    "新消费", "国货", "泡泡玛特", "潮玩", "盲盒", "限定",
+    "会员体系", "积分", "私域运营", "用户画像",
+    # 科技公司动态
+    "google", "microsoft", "meta", "字节", "腾讯",
     "阿里", "百度", "小米", "华为", "苹果", "特斯拉",
+    "美团", "京东", "拼多多", "滴滴", "快手",
+    "小红书", "bilibili", "b站", "阿里云", "豆包",
+    "kimi", "minimax", "智谱", "月之暗面", "零一万物",
 ]
 
 AI_KEYWORDS = [
     "ai", "人工智能", "大模型", "llm", "gpt", "claude", "gemini",
     "deepseek", "openai", "anthropic", "模型", "智能体", "agent",
-    "机器学习", "深度学习", "神经网络", "算法", "推理", "训练"
+    "机器学习", "深度学习", "神经网络", "算法", "推理", "训练",
+    "多模态", "生成式", "语言模型", "copilot", "自动化"
 ]
+
+# 只保留最近N天内发布的文章（避免推送旧文章）
+ARTICLE_MAX_AGE_DAYS = 3
 
 # ===================== 工具函数 =====================
 def get_today():
@@ -99,6 +123,19 @@ def strip_html(raw_html):
     if not raw_html:
         return ""
     return clean_text(BeautifulSoup(str(raw_html), "html.parser").get_text())
+
+def is_article_fresh(pub_time_str):
+    """判断文章是否在最近N天内发布"""
+    if not pub_time_str:
+        return True  # 没有发布时间则不过滤
+    try:
+        import email.utils
+        pub_dt = email.utils.parsedate_to_datetime(pub_time_str)
+        pub_dt = pub_dt.replace(tzinfo=None) if pub_dt.tzinfo else pub_dt
+        cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=ARTICLE_MAX_AGE_DAYS)
+        return pub_dt > cutoff
+    except Exception:
+        return True  # 解析失败则不过滤
 
 def is_relevant(title, summary=""):
     text = (title + " " + summary[:300]).lower()
@@ -243,6 +280,11 @@ def fetch_articles_from_source(name, mp_id, category, tag, pushed_urls):
             title    = clean_text(getattr(entry, "title", ""))
             link     = getattr(entry, "link", "")
             pub_time = getattr(entry, "published", "") or getattr(entry, "updated", "")
+
+            # 新鲜度过滤：只保留最近N天内的文章
+            if not is_article_fresh(pub_time):
+                logging.info(f"  [过期] 跳过旧文章: {title[:40]}")
+                continue
 
             summary = ""
             if hasattr(entry, "content") and entry.content:
@@ -502,4 +544,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
